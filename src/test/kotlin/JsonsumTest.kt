@@ -2,6 +2,8 @@ package org.jsonsum
 
 import com.fasterxml.jackson.core.JsonParseException
 import com.fasterxml.jackson.core.io.JsonEOFException
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.fasterxml.jackson.module.kotlin.readValue
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.Test
@@ -24,10 +26,13 @@ class JsonsumTest {
         EqualityTestData("Different object nesting gives different checksums", """[{},"ho",{"hi":2}]""", """[{"ho":{"hi":2}}]""", false),
         EqualityTestData("Encoding of numbers should not matter", """2""", """2.0""", true),
         EqualityTestData("Repeated fields in arrays should not cancel", """[{"1":1},{"1":1},{"1":1}]""", """[{"1":1}]""", false),
+        EqualityTestData("Identical values should not cancel each other out", """{"a":1,"b":1}""", """{"a":2,"b":2}""", false),
+        EqualityTestData("Identical subobjects should not cancel each other out", """{"a":{"c":{"hi":"ho"}},"b":{"d":{"x":1}}}""", """{"a":{"c":{"hi":"ho","extra":1}},"b":{"d":{"x":1,"extra":1}}}""", false),
     ).map { t ->
         DynamicTest.dynamicTest(t.name) {
             val c1 = jsonsum(t.left)
             val c2 = jsonsum(t.right)
+            println("${t.name}: ${c1.hex}   ${c2.hex}")
             if (t.equal) {
                 assertEquals(c1, c2)
             } else {
@@ -37,44 +42,25 @@ class JsonsumTest {
     }
 
     @TestFactory
-    fun checksum(): List<DynamicTest> = listOf(
-        Pair("""{}""", 3711965057u),
-        Pair("""[]""", 223132457u),
-        Pair("""""""", 2018536706u),
-        Pair(""""hi"""", 3572422966u),
-        Pair("""0""", 2102537547u),
-        Pair("""0.0""", 2102537547u),
-        Pair("""0e0""", 2102537547u),
-        Pair("""true""", 2238339752u),
-        Pair("""false""", 1993550816u),
-        Pair("""null""", 2013832146u),
-        Pair("""{"hi":1,"ho":2}""", 1308407541u),
-        Pair("""[[],[2]]""", 2077149373u),
-        Pair("""[[[2]]]""", 3539679565u),
-        Pair("""[{},"ho",{"hi":2}]""", 2520557453u),
-        Pair("""[{"ho":{"hi":2}}]""", 4250229204u),
-        Pair("""[{"hi":{"hi":2}}]""", 2963545766u),
-        Pair("""{"1":1,"2":2}""", 593357170u),
-        Pair("""[{"1":1},{"1":1}]""", 2843930034u),
-    ).map { (j, sum) ->
-        DynamicTest.dynamicTest(j) {
-            assertEquals(sum, jsonsum(j).uint)
-        }
-    }
-
-    @TestFactory
-    fun allTheSame(): List<DynamicTest> = listOf(
-        Pair(listOf("0", "0.0", "0e0", "0e1", "0e100", "0.0e100", "-0", "-0.0", "-0.0e1"), 2102537547u),
-        Pair(listOf("1", "1.0", "10.0e-1", "0.1e1", "10000000000000000000000000000000000000000e-40"), 2089830268u),
-        Pair(listOf(/*"\"\t\"",*/ "\"\\t\"", "\"\\u0009\""), 3529881795u), // unescaped tab is not allowed
-        Pair(listOf("\"/\"", "\"\\/\""), 3541612589u),
-    ).flatMap { (nums, sum) ->
-        nums.map { n ->
-            DynamicTest.dynamicTest(n.toString()) {
-                assertEquals(sum, jsonsum(n).uint)
+    fun checksum(): List<DynamicTest> = loadJson("testdata.json")
+        .flatMap { (name, inputs, sum) ->
+            inputs.map { input ->
+                DynamicTest.dynamicTest(name) {
+                    assertEquals(sum, jsonsum(input).hex)
+                }
             }
         }
-    }
+
+    data class TestVector(
+        val name: String,
+        val inputs: List<String>,
+        val sha256: String,
+    )
+
+    private fun loadJson(filename: String) = jacksonObjectMapper()
+        .readValue<List<TestVector>>(
+            javaClass.getResource("/$filename")!!
+        )
 
 
     @TestFactory
